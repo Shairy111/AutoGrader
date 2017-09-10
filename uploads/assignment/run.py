@@ -34,7 +34,7 @@ def touch(fname, times=None):
 
 def get_score_from_result_line(res_line, total_points):
     # case where we have failures and passes
-    match = re.match(r"=*\s(\d*)\sfailed,\s(\d*)\spassed,\s.*", res_line)
+    match = re.match(r"=*\s(\d*)\sfailed,\s(\d*)\spassed,?\s.*", res_line)
     passed = 0
     failed = 0
     if match:
@@ -53,10 +53,9 @@ def get_score_from_result_line(res_line, total_points):
             else:
                 logging.error("Failed to parse score line: " + res_line)
                 # TODO: throw exception
-                return (0,0,0)
+                return (0,0)
 
-    percent = ((float(passed) * total_points / (passed+failed)) / total_points) * 100
-    return (passed, failed, percent)
+    return (passed, failed)
 
 def run_student_tests(target_folder, total_points, timeout):
     logging.debug("Running student tests in: " + target_folder)
@@ -67,7 +66,7 @@ def run_student_tests(target_folder, total_points, timeout):
 
     logging.debug("Changing directory ... ")
     os.chdir(target_folder)
-    score = (0, 0, 0) # passed, failed, percent
+    score = (0, 0) # passed, failed
 
     logging.debug("Capturing stdout")
 
@@ -233,14 +232,20 @@ class Submission():
             r = self.submit_assignment()
             result = r.json()
             score = result['message']
-            logging.info("RESPONSE: " + " passed: " + str(score[0]) + " failed: " + str(score[1]) + " percent: " + str(score[2]))
+            logging.info("="*80)
+            logging.info("RESPONSE: " + " passed: " + str(score[0]) + " failed: " + str(score[1]) + " score: " + str(score[2]))
             logging.info("NOTE: You can see your submission on web interface also.")
+            logging.info("="*80)
         elif sys.argv[1] == "local":
             (result, out) = run_student_tests(os.getcwd(), self.config['total_points'], self.config['timeout'])
-            logging.info("RESULT: " + " passed: " + str(result[0]) + " failed: " + str(result[1]) + " percent: " + str(result[2]))
+            logging.info("="*80)
+            logging.info("RESULT: " + " passed: " + str(result[0]) + " failed: " + str(result[1]))
+            logging.info("="*80)
             write_student_log(os.getcwd(), out)
         else:
+            logging.error("="*80)
             logging.error("ERROR: Invalid argument supplied")
+            logging.error("="*80)
 
 
 s = Submission()

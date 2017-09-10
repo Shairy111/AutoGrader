@@ -1,9 +1,17 @@
 from django.conf import settings
+from django.contrib.sites.shortcuts import get_current_site
 from django.contrib.auth.decorators import login_required
+from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth import login, authenticate
 from django.shortcuts import render, redirect
 from django.http import HttpResponse, Http404
 from django.contrib.auth.models import User
+from django.utils.encoding import force_bytes
+from django.utils.http import urlsafe_base64_encode
+from django.utils.http import urlsafe_base64_decode
+from django.template.loader import render_to_string
+from .tokens import account_activation_token
+from django.utils.encoding import force_text
 from django.views.decorators.csrf import csrf_exempt
 from django.core import serializers
 from django.utils import timezone
@@ -58,7 +66,6 @@ def home(request):
             course = Course.objects.filter(enroll_key=secret_key).first()
             if course:
                 already_registered = Student.objects.filter(pk=student.id, courses__id=course.id).exists()
-                print (already_registered)
                 if already_registered:
                     messages.warning(request, 'You have already registered that course')
                 else:
@@ -86,21 +93,64 @@ def signup(request):
     if request.method == 'POST':
         form = SignUpForm(request.POST)
         if form.is_valid():
-            user = form.save()
-            user.refresh_from_db()
+            user = form.save(commit=False)
+            user.is_active = False
             user.save()
 
             student = Student.objects.create(user=user)
             student.save()
+            
+            current_site = get_current_site(request)
+            subject = 'Activate Your FAST AutoGrader Account'
+            message = render_to_string('account/account_activation_email.html', {
+                'user': user,
+                'domain': current_site.domain,
+                'uid': urlsafe_base64_encode(force_bytes(user.pk)),
+                'token': account_activation_token.make_token(user),
+            })
 
-            raw_password = form.cleaned_data.get('password1')
-            user = authenticate(username=user.username, password=raw_password)
-            login(request, user)
-            request.session['username'] = user.username
-            return redirect('home')
+            try:
+                user.email_user(subject, message)
+                return redirect('account_activation_sent')
+            except Exception:
+                form.add_error(None, "Email sending failed, try again later.")
+                user.delete()
+
+            #user = form.save()
+            #user.refresh_from_db()
+            #user.save()
+
+            #student = Student.objects.create(user=user)
+            #student.save()
+
+            #raw_password = form.cleaned_data.get('password1')
+            #user = authenticate(username=user.username, password=raw_password)
+            #login(request, user)
+            #request.session['username'] = user.username
+            #return redirect('home')
     else:
         form = SignUpForm()
     return render(request, 'signup.html', {'form': form})
+
+def activate(request, uidb64, token):
+    try:
+        uid = force_text(urlsafe_base64_decode(uidb64))
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user is not None and account_activation_token.check_token(user, token):
+        user.is_active = True
+        user.student.email_confirmed = True
+        user.save()
+        login(request, user)
+        return redirect('home')
+    else:
+        return render(request, 'account/account_activation_invalid.html')
+
+
+def account_activation_sent(request):
+    return render(request, 'account/account_activation_sent.html')
 
 def download(request):
     # TODO: break when user try to download Instructor Test file
@@ -126,7 +176,10 @@ def download(request):
                 return Http404
     elif submission_id:
         submission = Submission.objects.get(id=submission_id)
-        if submission:
+        # Download modifiable_file of student when user is staff or admin
+        if submission and action == "modifiable_file" and (request.user.is_staff or request.user.is_superuser):
+            path = submission.get_modifiable_file()
+        elif submission:
             path = submission.get_log_file()
 
     file_path = os.path.join(settings.MEDIA_ROOT, path)
@@ -208,65 +261,59 @@ def api(request, action):
     email = request.POST.get('email')
     submission_pass = request.POST.get('submission_pass')
 
-    user = User.objects.filter(email=email)
-    if (user.exists()):
-        student = Student.objects.filter(user=user[0], submission_pass=submission_pass)
-        if (student.exists()):
-            student = student[0]
-            if (action == "submit_assignment"):
+    student = Student.objects.filter(user__email=email, submission_pass=submission_pass)
+    if (student.exists()):
+        student = student[0]
+        if (action == "submit_assignment"):
 
-                if request.method == 'POST':
+            if request.method == 'POST':
 
-                    assignment = Assignment.objects.filter(id=request.POST.get('assignment'), open_date__lte=timezone.now()).first()
+                assignment = Assignment.objects.filter(id=request.POST.get('assignment'), open_date__lte=timezone.now()).first()
 
-                    if not assignment:
-                        response_data = {"status": 404, "type": "ERROR",
-                         "message": "Assignment doesn't exists"}
-                    elif assignment and timezone.now() > assignment.due_date:
-                        response_data = {"status": 400, "type": "ERROR",
-                         "message": "Assignment submission date expired"}
-                    else:
-                        submission = Submission(submission_file=request.FILES['submission_file'],
-                            assignment=assignment,
-                            student=student)
-                        submission.save()
-
-                        submission_file_url = submission.submission_file.url
-                        extract_directory = submission_file_url.replace(".zip","/")
-
-                        zip_file = zipfile.ZipFile(submission.submission_file.url, 'r')
-                        zip_file.extractall(extract_directory)
-                        zip_file.close()
-
-                        # Move Instructor Test File
-                        shutil.copy(assignment.instructor_test.url, extract_directory)
-
-                        # Move Student Test File
-                        shutil.copy(assignment.student_test.url, extract_directory)
-        
-                        score, outlog = run_student_tests(extract_directory, assignment.total_points, assignment.timeout)
-                        
-                        submission.passed  = score[0]
-                        submission.failed  = score[1]
-                        submission.percent = score[2]
-
-                        submission.save()
-
-                        response_data = {"status": 200, "type": "SUCCESS",
-                             "message": score}
-
-                else:
+                if not assignment:
+                    response_data = {"status": 404, "type": "ERROR",
+                     "message": "Assignment doesn't exists"}
+                elif assignment and timezone.now() > assignment.due_date:
                     response_data = {"status": 400, "type": "ERROR",
-                             "message": "Use POST method"}
+                     "message": "Assignment submission date expired"}
+                else:
+                    submission = Submission(submission_file=request.FILES['submission_file'],
+                        assignment=assignment,
+                        student=student)
+                    submission.save()
+
+                    submission_file_url = submission.submission_file.url
+                    extract_directory = submission_file_url.replace(".zip","/")
+
+                    zip_file = zipfile.ZipFile(submission.submission_file.url, 'r')
+                    zip_file.extractall(extract_directory)
+                    zip_file.close()
+
+                    # Move Instructor Test File
+                    shutil.copy(assignment.instructor_test.url, extract_directory)
+
+                    # Move Student Test File
+                    shutil.copy(assignment.student_test.url, extract_directory)
+    
+                    score, outlog = run_student_tests(extract_directory, assignment.total_points, assignment.timeout)
+                    
+                    submission.passed  = score[0]
+                    submission.failed  = score[1]
+                    
+                    submission.save()
+
+                    response_data = {"status": 200, "type": "SUCCESS",
+                         "message": [score[0], score[1], submission.get_score()]}
+
             else:
                 response_data = {"status": 400, "type": "ERROR",
-                             "message": "Invalid action"}
+                         "message": "Use POST method"}
         else:
             response_data = {"status": 400, "type": "ERROR",
-                             "message": "Invalid student"}
+                         "message": "Invalid action"}
     else:
-        response_data = {"status": 400,
-                         "type": "ERROR", "message": "Invalid user"}
+        response_data = {"status": 403, "type": "ERROR",
+                         "message": "Invalid student"}
 
     r = JsonResponse(response_data, safe=False)
     r.status_code = response_data['status']
@@ -286,3 +333,14 @@ def change_password(request):
     return render(request, 'account/change_password.html', {
         'form': form
     })
+
+@staff_member_required
+def assignment_report(request, assignment_id):
+    assignment = Assignment.objects.get(id=assignment_id)
+    submissions = assignment.get_student_latest_submissions()
+    return render(request, 'admin/assignment_report.html', {
+        'submissions': submissions,
+        'assignment': assignment,
+        'generated_on': timezone.now()
+    })
+

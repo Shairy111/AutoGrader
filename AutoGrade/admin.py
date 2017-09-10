@@ -1,13 +1,17 @@
+from django.conf import settings
 from django.contrib import admin
 from django.db.models import Max, Count
 from django.contrib.auth.models import User
 from django import forms
 from .models import *
+from django.contrib import admin
+from django.utils.html import format_html
+from django.core.urlresolvers import reverse
 
 class UserInline(admin.StackedInline):
     model = User
 
-@admin.register(Instructor) 
+@admin.register(Instructor)
 class InstructorModelAdmin(admin.ModelAdmin):
     #inlines = [UserInline,]
 
@@ -17,7 +21,7 @@ class InstructorModelAdmin(admin.ModelAdmin):
             return qs
         return qs.none()
 
-@admin.register(Course) 
+@admin.register(Course)
 class CourseModelAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super(CourseModelAdmin, self).get_queryset(request)
@@ -25,7 +29,9 @@ class CourseModelAdmin(admin.ModelAdmin):
             return qs
         return qs.filter(instructor__user=request.user)
 
-@admin.register(Student) 
+    list_display = ('name', 'enroll_key', 'instructor')
+
+@admin.register(Student)
 class StudentModelAdmin(admin.ModelAdmin):
     #inlines = [UserInline,]
 
@@ -35,11 +41,13 @@ class StudentModelAdmin(admin.ModelAdmin):
             return qs
         return qs.filter(courses__instructor__user=request.user)
 
+    list_display = ('student_username', 'student_firstname', 'student_lastname', 'student_email') 
+
 class SubmissionInline(admin.TabularInline):
     model = Submission
     fieldsets = (
         (None, {
-            'fields': ('student','passed', 'failed', 'percent', 'publish_date')
+            'fields': ('student','passed', 'failed', 'publish_date')
         }),
     )
 
@@ -56,7 +64,7 @@ class SubmissionInline(admin.TabularInline):
 class AssignmentFormAdmin(forms.ModelForm):
     # Receive from get_form of AssignmentModalAdmin
     current_user = None
-    
+
     def __init__(self, *args, **kwargs):
         super(AssignmentFormAdmin, self).__init__(*args, **kwargs)
         if not self.current_user.is_superuser:
@@ -82,11 +90,21 @@ class OtherFileAdmin(admin.ModelAdmin):
 
 admin.site.register(OtherFile, OtherFileAdmin)
 
-@admin.register(Assignment) 
-class AssignmentModelAdmin(admin.ModelAdmin):    
+
+
+@admin.register(Assignment)
+class AssignmentModelAdmin(admin.ModelAdmin):
+
+    def assignment_report(self, obj):
+        return '<a target="_blank" href="' + reverse("home") + 'assignment_report/' + str(obj.id) + '">Show Report</a>'
+
+    assignment_report.short_description = 'Show Report'
+    assignment_report.allow_tags = True
+
     form = AssignmentFormAdmin
     inlines = [OtherFilesInline,]
-
+    list_display = ('title', 'course', 'due_date', 'open_date', 'assignment_report')
+    list_filter = ('course', )
     def get_form(self, request, *args, **kwargs):
          form = super(AssignmentModelAdmin, self).get_form(request, *args, **kwargs)
          form.current_user = request.user
@@ -97,8 +115,8 @@ class AssignmentModelAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return qs
         return qs.filter(course__instructor__user=request.user)
-    
-@admin.register(Submission) 
+
+@admin.register(Submission)
 class SubmissionModelAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         qs = super(SubmissionModelAdmin, self).get_queryset(request)
