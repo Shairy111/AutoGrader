@@ -29,7 +29,12 @@
 	 				<div class="col col-sm-6" style="text-align: right; padding-top: 5px;">
 	 					<p>
 	 						<small><b>Open Date: </b>{{ selected_assignment.open_date }}</small><br />
-	 						<small><b>Due Date: </b>{{ selected_assignment.due_date }}</small><br />
+	 						<small><b>Due Date: </b>{{ corrected_due_date }}</small><br />
+							<small><b>Late Days Left: </b>{{ late_days_left }} <br />
+									{% if can_request_extension %}
+									    <span id="btnRequestExtension" class="btn btn-info btn-sm confirm">Request Extension</span>
+							    {% endif %}
+						  </small><br />
 	 					</p>
 	 				</div>
 	 			</div>
@@ -42,7 +47,8 @@
 
                 <div class="row">
                     <div class="col col-sm-12">
-                        <div class='alert alert-{%if assignment_expired %}danger{% else %}success{% endif %}'>{{time_left}}</div>
+                        <div class='alert alert-{%if assignment_expired %}danger{% else %}success{% endif %}'>{{time_left}}
+												</div>
                     </div>
                 </div>
 
@@ -110,7 +116,7 @@
 	 						<th>Passed</th>
 	 						<th>Failed</th>
 	 						<th>Score</th>
-	 						<th>Log</th>
+	 						<th>View</th>
 	 					</tr>
 	 					{% for submission in submission_history %}
 	 					<tr>
@@ -118,8 +124,12 @@
 	 						<td>{{ submission.publish_date }}</td>
 	 						<td>{{ submission.passed }}</td>
 	 						<td>{{ submission.failed }}</td>
-	 						<td>{{ submission.get_score }}/{{ submission.assignment.total_points }}</td>
-	 						<td><a href="" data-toggle="modal" data-target="#logModal" data-load-url="{% url 'home' %}download/?sid={{ submission.id }}&action=log_file&raw=1" class="btn btn-info btn-sm">VIEW</a></td>
+	 						<td>{{ submission.get_score | floatformat:2}}/{{ submission.assignment.total_points }}</td>
+							<td>
+		 						{% if show_view_log_button %}<a href="" data-toggle="modal" data-target="#logModal" data-load-url="{% url 'home' %}download/?sid={{ submission.id }}&action=log_file&raw=1" class="btn btn-info btn-sm">Log</a>{% endif %}
+								<a href="" data-toggle="modal" data-target="#logModal" data-load-url="{% url 'home' %}download/?sid={{ submission.id }}&action=modifiable_file&raw=1" class="btn btn-success btn-sm">Code</a>
+							</td>
+
 	 					</tr>
 	 					{% endfor %}
 	 				</table>
@@ -138,6 +148,38 @@
 			var loadurl = $(e.relatedTarget).data('load-url');
 			$(this).find('.modal-log-content').html("").load(loadurl);
 		});
+		{% if can_request_extension %}
+		jconfirm.defaults = {
+			theme: 'material',
+		};
+		$('#btnRequestExtension').confirm({
+	    title: 'Confirm Extension Request',
+	    content: 'Are you sure you want to request an extension? You will be using up <b>{{ late_days_needed }}</b> of your remaining <b>{{ late_days_left }}</b> late days.',
+	    buttons: {
+	        confirm: {
+						text: 'Yes, request extension.',
+						btnClass: 'btn-info',
+						keys: ['enter', 'shift'],
+						action: function(){
+							  url = "{% url 'home' %}request_extension?aid={{ selected_assignment.id }}"
+							  $.ajax({
+									url: url,
+									success: function (msg) {
+					            alert(msg + "This page will now reload.");
+											location.reload();
+					        },
+									error: function (request, error) {
+							        alert("Error getting: " + url);
+							    },
+					        async: false
+					    	});
+						}
+	        },
+	        cancel: function () {}
+	    }
+		});
+		{% endif %}
+
 	});
 	</script>
 	<div id="logModal" class="modal fade" role="dialog">
@@ -147,7 +189,7 @@
 			<div class="modal-content">
 			<div class="modal-header">
 				<button type="button" class="close" data-dismiss="modal">&times;</button>
-				<h4 class="modal-title">Submission Log</h4>
+				<h4 class="modal-title">Submission Info</h4>
 			</div>
 			<div class="modal-body">
 				<pre class="modal-log-content">

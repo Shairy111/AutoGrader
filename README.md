@@ -4,37 +4,37 @@ A Python based AutoGrader for Python Assignments.
 
 ## Introduction
 
-This system is developed for [FAST-NUCES Peshawar Campus](http://pwr.nu.edu.pk) for the handling of the student assignments. This system provide auto grading functionality for the students submission and generated submission reports for the Instructor.
+This system is developed for [FAST-NUCES Peshawar Campus](http://pwr.nu.edu.pk) for the handling of student assignments. This system provide auto grading functionality for the students submission and generate submission reports for the instructor.
 
 ### Functionality
 
-1. Admin, Instructor and Student accounts.
+1. Admin, Instructor and Student accounts
 2. Course with unique enroll key
-3. Assignments with test and assignment file.
+3. Assignments with test and assignment file
 4. Assignment Submission Report (based on the latest submission)
 5. Student Account: Password Recovery, Submission Password, Submission Score and Submission Log
 
 ### Prerequisites
 
-Check [requirement.txt](requirement.txt) for the prerequisites packages. You can install requirment package using following command:
+Check [requirements.txt](requirements.txt) for the prerequisites packages. You can install requirment package using following command:
  
-```
+```shell
 cd AutoGrader/
-pip install -r requirement.txt
+pip install -r requirements.txt
 ```
 
 ### Installing
 
 For the installation first grab the latest source from the [GitHub](https://github.com/BilalZaib/AutoGrader)
 
-```
+```shell
 git clone git@github.com:BilalZaib/AutoGrader.git
 cd AutoGrader/
 ```
 
 Edit settings.py of Django
 
-```
+```shell
 cd AutoGr/
 mv settings-sample.py settings.py
 vi settings.py
@@ -43,18 +43,18 @@ cd ../
 Note: You have to add secret key and SMTP detail in this file. You can generate Django secret key from any online website.
 
 Setting up super user for Django
-```
+```shell
 python manage.py migrate
 python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Now go to [http://127.0.0.1:8000/admin](http://127.0.0.1:8000/admin) to login into the system.
+Now go to [http://127.0.0.1:8000/admin](http://127.0.0.1:8000/admin) to logon to the system.
 
 ## Getting into system?
-1. After the installation admin user will logon to the system.
-2. It will create the Instructor, set him as "is_staff" and assign the permissions for example Assignment (All), Course (View only), Student (All) and Submission (All).
-3. After the creation of Instructor, instructor will logon to his account.
+1. After the installation admin user can logon to the system.
+2. Admin can create the Instructor, set him as "is_staff" and assign the permissions for example Assignment (All), Course (View only), Student (All) and Submission (All).
+3. After the creation of instructor, instructor will logon to his account.
 4. Instructor will create Assignment and share enroll key with students.
 5. Student will register to the system from [http://127.0.0.1:8000/autograder](http://127.0.0.1:8000/autograder)
 6. Student will logon to the system and enter the enroll key to enroll into the course.
@@ -83,7 +83,7 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 ## Authors
 
-* **Hafiz M. Bilal Zaib** - *Initial work* - [BilalZaib](https://github.com/BilalZaib)
+* **Hafiz M. Bilal Zaib** - *Initial coding* - [BilalZaib](https://github.com/BilalZaib)
 * **Mohammad Nauman** - *Design and requirement gathering* - [recluze](https://github.com/recluze)
 * **Syed Owais Ali Chishti** - *Funtionality integrations* - [soachishti](https://github.com/soachishti)
 
@@ -96,7 +96,8 @@ This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md
 ## Acknowledgments
 
 * [autograder-basic](https://github.com/recluze/autograder-basic/) developed by [recluze](https://github.com/recluze) was used for grading purpose.
+* [moss.py](https://github.com/soachishti/moss.py): Python interface of [Moss](http://theory.stanford.edu/~aiken/moss/) was used for Detecting Software Similarity.
 
 ## Note
 
-There are not sandboxing mechanism in the system, however auto backups and system permission are used for now.
+There are no sandboxing mechanism in this system, however auto backups and system permission are used for now.

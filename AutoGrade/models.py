@@ -2,6 +2,7 @@ from __future__ import unicode_literals
 
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models import Sum
 from django.db.models.signals import post_save, pre_save
 from django.dispatch import receiver
 from django.conf import settings
@@ -9,13 +10,17 @@ from django.conf import settings
 from .storage import OverwriteStorage
 
 from os.path import basename
-from datetime import datetime    
+from datetime import datetime, timedelta
 import string
 import random
 import time
 import zipfile
 import json
 import os
+from shutil import copyfile
+import mosspy
+import logging
+from .grader import touch
 
 def other_files_directory_path(instance, filename):
     # file will be uploaded to MEDIA_ROOT/user_<id>/<filename>
@@ -42,20 +47,21 @@ class Instructor(models.Model):
 
     def __str__(self):
         return self.user.username
-    
+
 class Course(models.Model):
     instructor = models.ForeignKey(Instructor, null=False, default=None)
     name = models.CharField(max_length=64)
     enroll_key = models.CharField(max_length=8, default=enroll_key, unique=True) # Secret key to enroll
     course_id = models.CharField(max_length=64) # CS101
+    max_extension_days = models.IntegerField(default=0)
 
     def __str__(self):
         return self.name
 
 class Student(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE) # name, email, password
-    email_confirmed = models.BooleanField(default=False)
-    submission_pass = models.CharField(max_length=12, default=submission_key) 
+    email_confirmed = models.BooleanField(default=False) # TODO: us this instead of is_active in sign up and resend email.
+    submission_pass = models.CharField(max_length=12, default=submission_key)
     courses = models.ManyToManyField(Course)
 
     def get_roll_number(self):
@@ -77,13 +83,25 @@ class Student(models.Model):
         return self.user.email
     student_email.short_description = 'Email'
 
+    def get_late_days_left(self, course):
+        aes = AssignmentExtension.objects.filter(student=self, assignment__course=course)
+        days_extended = aes.aggregate(Sum('days'))['days__sum']
+
+        if days_extended is None:
+            days_extended = 0
+        late_days_left = course.max_extension_days - days_extended
+        return late_days_left
+
+    def __str__(self):
+        return self.user.first_name + " " + self.user.last_name + " (" + self.user.email + ")"
+
 
 class Assignment(models.Model):
     course          = models.ForeignKey(Course, on_delete=models.CASCADE, null=False, default=None)
-    
+
     title           = models.CharField(max_length=64, null=False, default=None)
     description     = models.TextField(max_length=8192, null=True, default=None)
-    
+
     # Files
     instructor_test = models.FileField(upload_to=assignment_directory_path, null=False, default=None, storage=OverwriteStorage())
     student_test    = models.FileField(upload_to=assignment_directory_path, null=False, default=None, storage=OverwriteStorage())
@@ -99,19 +117,74 @@ class Assignment(models.Model):
     class Meta():
         unique_together = ('course', 'title',)
 
-    def get_student_latest_submissions(self):
+
+    def corrected_due_date(self, student=None):
+
+        aes = AssignmentExtension.objects.filter(assignment=self, student=student)
+        days_extended = aes.aggregate(Sum('days'))['days__sum']
+
+        if days_extended is None:
+            days_extended = 0
+
+        corrected_due_date = self.due_date + timedelta(days=days_extended)
+        return corrected_due_date
+
+
+    def get_student_and_latest_submissions(self):
         # TODO: Try to acheive this by sub queries using Django ORM
         # Get students of this course
-        students = Student.objects.filter(courses=self.course)
+        students = Student.objects.filter(courses=self.course).order_by('user__email')
         submissions = []
         for student in students:
-            submission = Submission.objects.filter(student=student, assignment=self).order_by("-publish_date").first()
-            submissions.append([submission, student])
-            
+            submission = Submission.objects.filter(student=student, assignment=self).order_by("-publish_date")
+            student_submission_count = len(submission)
+            submission = submission.first()
+            submissions.append([submission, student, student_submission_count])
+
         return submissions
 
+    def moss_report(self):
+        moss_report = 'uploads/moss_submission/assignment_' + str(self.id) + "/" + str(self.id) + ".html"
+        if os.path.exists(moss_report):
+            return moss_report
+        return False
+
+    def moss_submit(self):
+        moss_folder = 'uploads/moss_submission/assignment_{0}/'.format(self.id)
+
+        submissions = self.get_student_and_latest_submissions() # include all students of the assignment's course annd submission can be empty
+
+        submission_count = 0
+        for submission, student, _ in submissions:
+            if submission != None:
+                modifiable_file = submission.get_modifiable_file()
+                path = moss_folder + basename(modifiable_file).replace(".", "-" + submission.student.get_roll_number() + ".")
+                touch(path)
+                copyfile(modifiable_file, path)
+                submission_count += 1
+
+        if submission_count == 0:
+            logging.debug("MOSS: No submissions available for generating Moss report")
+            return False
+
+        m = mosspy.Moss(settings.MOSS_USERID, "python")
+        m.addBaseFile(self.assignment_file.url)
+        m.addFilesByWildcard(moss_folder + "*.py")
+
+        url = m.send()
+        if url:
+            logging.debug("MOSS: " + url)
+
+            path = moss_folder + str(self.id) + ".html"
+            touch(path)
+            m.saveWebPage(url, path)
+            return True
+        else:
+            logging.debug("MOSS: No url received.")
+            return False
+
     def __str__(self):
-        return self.title
+        return self.title + " (" + self.course.course_id + ")"
 
 class OtherFile(models.Model):
     file = models.FileField(upload_to=other_files_directory_path, null=False, default=None, storage=OverwriteStorage())
@@ -132,26 +205,51 @@ class Submission(models.Model):
         return float(self.passed) * self.assignment.total_points / total
 
     def get_modifiable_file(self):
+        # Return students modifiable file
         return self.submission_file.url.replace(".zip","")  + "/" + os.path.basename(self.assignment.assignment_file.url)
 
     def get_log_file(self):
         return self.submission_file.url.replace(".zip","")  + "/test-results.log"
 
-    def __str__(self):
-        return self.assignment.title + " (submission_id: " + str(self.id) + ")"
+    def assignment_course(self):
+        return self.assignment.course
+    assignment_course.short_description = 'Course'
 
+    def __str__(self):
+        return self.assignment.title + " (" + self.student.user.email + " - id: " + str(self.id) + ")"
+
+class AssignmentExtension(models.Model):
+    assignment      = models.ForeignKey(Assignment)
+    student         = models.ForeignKey(Student)
+    days            = models.IntegerField(default=0)
+
+    def assignment_due_date(self):
+        return self.assignment.due_date
+    assignment_due_date.short_description = 'Due Date'
+
+    def assignment_corrected_due_date(self):
+        return self.assignment.corrected_due_date(self.student)
+    assignment_corrected_due_date.short_description = 'Corrected Due Date'
+
+    def course_max_extensions(self):
+        return self.assignment.course.max_extension_days
+    course_max_extensions.short_description = 'Total Extension Days for Course'
+
+    def days_left_for_course(self):
+        return self.student.get_late_days_left(self.assignment.course)
+    days_left_for_course.short_description = 'Extension Days Left'
 
 # Create zip file of Assignment
 @receiver(post_save, sender=Assignment)
 def create_assignment_zip_file(sender, instance, created, **kwargs):
     assignment_directory = assignment_directory_path(instance, "")
-    
+
     # save in assignment folder as "assignment[ID].zip" eg. "assignment2.zip"
     zip_full_path = assignment_directory + "assignment" + str(instance.id) + ".zip"
 
     # Creating student zip file
     zip_file = zipfile.ZipFile(zip_full_path, 'w', zipfile.ZIP_DEFLATED)
-    
+
     assignment_id = int(instance.id);
 
     student_config = {
@@ -170,7 +268,7 @@ def create_assignment_zip_file(sender, instance, created, **kwargs):
     files.append(instance.student_test.url)
     files.append(instance.assignment_file.url)
     files.append(student_config_file)
-    
+
     other_files =  OtherFile.objects.filter(assignment=instance)
     for other_file in other_files:
         files.append(other_file.file.url)
@@ -178,7 +276,7 @@ def create_assignment_zip_file(sender, instance, created, **kwargs):
     with open("uploads/assignment/run.py","r") as file:
         content = file.read()
         content = content.replace("##RUN_API_URL##", settings.RUN_API_URL)
-        zip_file.writestr("run.py", content)      
+        zip_file.writestr("run.py", content)
 
     for file in files:
         zip_file.write(file, os.path.basename(file))
@@ -189,7 +287,7 @@ def create_assignment_zip_file(sender, instance, created, **kwargs):
 @receiver(post_save, sender=OtherFile)
 def create_assignment_zip_file_other_file(sender, instance, created, **kwargs):
     assignment_directory = assignment_directory_path(instance.assignment, "")
-    
+
     # save in assignment folder as "assignment[ID].zip" eg. "assignment2.zip"
     zip_full_path = assignment_directory + "assignment" + str(instance.assignment.id) + ".zip"
 

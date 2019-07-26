@@ -32,13 +32,17 @@ ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
     'AutoGrade.apps.AutogradeConfig',
-    'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'bootstrap3'
+    'bootstrap3',
+    'dbbackup',  # django-dbbackup
+    'material',
+    'material.frontend',
+    'material.admin',
+    'django.contrib.admin',
 ]
 
 MIDDLEWARE = [
@@ -49,6 +53,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+
 ]
 
 ROOT_URLCONF = 'AutoGr.urls'
@@ -126,10 +131,6 @@ STATIC_URL = '/static/'
 LOGIN_REDIRECT_URL = 'home'
 
 RUN_API_URL = "http://127.0.0.1:8000/autograde/api/"
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
-
-
-
 
 # LOGGING CONFIGURATION 
 LOGGING = {
@@ -208,3 +209,22 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
 DEFAULT_FROM_EMAIL = ''
+
+MOSS_USERID = 123456789
+
+AUTHENTICATION_BACKENDS = ['django.contrib.auth.backends.AllowAllUsersModelBackend']
+
+DBBACKUP_STORAGE = 'django.core.files.storage.FileSystemStorage'
+DBBACKUP_STORAGE_OPTIONS = {'location': 'c:/ag-backups'}
+
+# pip install dropbox django-storages
+# More: https://django-dbbackup.readthedocs.io/en/stable/storage.html
+#DBBACKUP_STORAGE = 'storages.backends.dropbox.DropBoxStorage'
+#DBBACKUP_STORAGE_OPTIONS = {
+#    'oauth2_access_token': 'my_token',
+#}
+
+
+
+# Set to False if you do not want the students to see Instructor test logs 
+ALLOW_INSTRUCTOR_TEST_LOG_VIEW = True    

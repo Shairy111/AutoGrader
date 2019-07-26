@@ -21,27 +21,75 @@ class InstructorModelAdmin(admin.ModelAdmin):
             return qs
         return qs.none()
 
+class CourseStudentsInline(admin.TabularInline):
+    verbose_name = "Enrolled Student"
+    verbose_name_plural = "Enrolled Students"
+    model = Student.courses.through
+    fields = ['student_name', 'student_email', 'student_username', 'student_roll_number']
+    readonly_fields = ['student_name', 'student_email', 'student_username', 'student_roll_number']
+    extra = 0
+    classes = ['collapse']
+
+    def has_add_permission(self, request):
+        return False
+
+    def student_username(self, instance):
+        return instance.student.user.username
+    student_username.short_description = 'student username'
+
+    def student_roll_number(self, instance):
+        return instance.student.get_roll_number()
+    student_roll_number.short_description = 'student roll number'
+
+    def student_email(self, instance):
+        return instance.student.user.email
+    student_email.short_description = 'student email'
+
+    def student_name(self, instance):
+        return instance.student.user.first_name + " " + instance.student.user.last_name
+    student_name.short_description = 'student name'
+
 @admin.register(Course)
 class CourseModelAdmin(admin.ModelAdmin):
+    inlines = [CourseStudentsInline,]
+
+    def student_stats(self, obj):
+        return '<a target="_blank" href="' + reverse("home") + 'course_students_stat/' + str(obj.id) + '">Student Stats</a>'
+
+    student_stats.short_description = 'Student Stats'
+    student_stats.allow_tags = True
+
+    # This will hide object name from tabular inline.
+    class Media:
+        css = { "all" : ("css/hide_admin_original.css",) }
+
     def get_queryset(self, request):
         qs = super(CourseModelAdmin, self).get_queryset(request)
         if request.user.is_superuser:
             return qs
         return qs.filter(instructor__user=request.user)
 
-    list_display = ('name', 'enroll_key', 'instructor')
+    list_display = ('name', 'enroll_key', 'instructor', 'student_stats')
+    exclude = ('courses', )
 
 @admin.register(Student)
 class StudentModelAdmin(admin.ModelAdmin):
     #inlines = [UserInline,]
 
+    def student_loginas(self, obj):
+        return '<a target="_blank" href="' + reverse("home") + 'loginas/' + str(obj.id) + '">Login as ' + obj.user.username + '</a>'
+
+    student_loginas.short_description = 'Login as Student'
+    student_loginas.allow_tags = True
+
     def get_queryset(self, request):
-        qs = super(StudentModelAdmin, self).get_queryset(request)
+        qs = super(StudentModelAdmin, self).get_queryset(request).distinct() 
         if request.user.is_superuser:
             return qs
-        return qs.filter(courses__instructor__user=request.user)
+        return qs.filter(courses__instructor__user=request.user).distinct() 
 
-    list_display = ('student_username', 'student_firstname', 'student_lastname', 'student_email') 
+    list_display = ('student_username', 'student_firstname', 'student_lastname', 'student_email', 'student_loginas')
+    search_fields = ['user__email', 'user__first_name', 'user__last_name', 'user__username']
 
 class SubmissionInline(admin.TabularInline):
     model = Submission
@@ -123,3 +171,19 @@ class SubmissionModelAdmin(admin.ModelAdmin):
         if request.user.is_superuser:
             return qs
         return qs.filter(assignment__course__instructor__user=request.user)
+    list_display = ('assignment', 'assignment_course', 'student', 'publish_date', 'passed', 'failed')
+    search_fields = ('student__user__first_name', 'student__user__last_name', 'student__user__email', 'assignment__title', 'assignment__course__name')
+
+@admin.register(AssignmentExtension)
+class AssignmentExtensionModelAdmin(admin.ModelAdmin):
+    def get_queryset(self, request):
+        qs = super(AssignmentExtensionModelAdmin, self).get_queryset(request)
+        if request.user.is_superuser:
+            return qs
+        return qs.filter(assignment__course__instructor__user=request.user)
+
+    # list_filter = ('assignment', )
+    search_fields = ('student__user__first_name', 'student__user__last_name', 'assignment__title', 'assignment__course__name')
+    list_display = ('student', 'assignment', 'days', 'assignment_due_date', 'assignment_corrected_due_date', 'course_max_extensions', 'days_left_for_course')
+
+    raw_id_fields = ('assignment', 'student')
